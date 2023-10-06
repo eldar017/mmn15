@@ -6,6 +6,8 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES, PKCS1_OAEP
 import os
 import zlib
+from datetime import datetime
+
 
 
 def initialize_database():
@@ -125,16 +127,19 @@ def handle_registration_request(conn, cursor, client_name):
         print(f"Client {client_name} already exists!")  # Add this print statement
         conn.sendall(struct.pack("<H", 2101))
         return
+    aes_key = os.urandom(16)
     client_id = uuid.uuid4().bytes
     public_key = conn.recv(450)
+    current_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute('''
-    INSERT INTO clients (ID, Name, PublicKey) VALUES (?, ?, ?)
-    ''', (client_id, client_name, public_key))
+    INSERT INTO clients (ID, Name, PublicKey, LastSeen, AESKey) VALUES (?, ?, ?, ?, ?)
+    ''', (client_id, client_name, public_key, current_datetime, aes_key))
     cursor.connection.commit()
     print(f"Registered client {client_name} with ID {client_id.hex()}")  # Add this print statement
     print("Sending response to client...")
     conn.sendall(struct.pack("<H16s", 2100, client_id))
     print("Response sent!")
+    print_client_records()
 
 
 
@@ -278,6 +283,16 @@ def server_loop(port):
             except:
                 pass  # ignore if we can't send the error
             conn.close()
+
+def print_client_records():
+    with sqlite3.connect('../db.defensive') as db_conn:
+        cursor = db_conn.cursor()
+        cursor.execute("SELECT * FROM clients")
+        rows = cursor.fetchall()
+
+        print("\nClient Records:")
+        for row in rows:
+            print(row)
 
 
 if __name__ == "__main__":
