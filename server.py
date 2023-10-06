@@ -19,7 +19,7 @@ def initialize_database():
         Name TEXT,
         PublicKey BLOB,
         LastSeen TEXT,
-        AESKey BLOB
+        AESKey BLOB NULL
     )
     ''')
 
@@ -44,6 +44,11 @@ def get_port_from_file():
     except FileNotFoundError:
         print("Warning: info.port not found. Using default port 1357.")
         return 1357
+
+def save_received_public_key(client_id, public_key):
+    file_name = f"{client_id.hex()}_public_key.pem"
+    with open(file_name, "wb") as pub_file:
+        pub_file.write(public_key)
 
 def calculate_crc(data):
     return zlib.crc32(data) & 0xFFFFFFFF
@@ -114,23 +119,24 @@ def handle_public_key_request(conn, cursor, client_name, public_key):
 
 
 def handle_registration_request(conn, cursor, client_name):
-    # Check if client_name already exists in the database
+    print(f"Handling registration for client {client_name}...")  # Add this print statement
     cursor.execute('SELECT * FROM clients WHERE Name=?', (client_name,))
     if cursor.fetchone():
-        # Send error code for failed registration (2101)
+        print(f"Client {client_name} already exists!")  # Add this print statement
         conn.sendall(struct.pack("<H", 2101))
         return
-
-    # Generate a new UUID for the client
     client_id = uuid.uuid4().bytes
-
-    # Insert new client into the database
+    public_key = conn.recv(450)
     cursor.execute('''
-    INSERT INTO clients (ID, Name) VALUES (?, ?)
-    ''', (client_id, client_name))
-
-    # Send success code with the new client ID (2100)
+    INSERT INTO clients (ID, Name, PublicKey) VALUES (?, ?, ?)
+    ''', (client_id, client_name, public_key))
+    cursor.connection.commit()
+    print(f"Registered client {client_name} with ID {client_id.hex()}")  # Add this print statement
+    print("Sending response to client...")
     conn.sendall(struct.pack("<H16s", 2100, client_id))
+    print("Response sent!")
+
+
 
 
 def handle_send_public_key_request(conn, cursor, client_name, public_key):
@@ -275,5 +281,6 @@ def server_loop(port):
 
 
 if __name__ == "__main__":
+    initialize_database()
     port = get_port_from_file()
     server_loop(port)
