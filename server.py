@@ -249,7 +249,12 @@ def server_loop(port):
         try:
             with conn:
                 # Decode the incoming message according to the protocol
-                header, client_id, version, code, payload_size = struct.unpack("<16sH2sH4s", conn.recv(24))
+                try:
+                    header, version, code, payload_size = struct.unpack("<16s2sH4s", conn.recv(24))
+                    client_id = header
+                except Exception as e:
+                    print(f"Failed to unpack the received data due to: {e}")
+                    return
 
                 if code == 1025:
                     # Registration request
@@ -262,8 +267,11 @@ def server_loop(port):
 
         except Exception as e:
             print(f"Error while handling client  {addr}: {e}")
-            conn.sendall(struct.pack("<H", 2107))
-
+            try:
+                conn.sendall(struct.pack("<H", 2107))
+            except:
+                pass  # ignore if we can't send the error
+            conn.close()
 
 
 if __name__ == "__main__":
