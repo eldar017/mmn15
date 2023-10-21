@@ -44,6 +44,7 @@ def send_file_to_server(sock, file_path, aes_key):
 
     # Pad the file content
     file_content_padded = pad(file_content)
+    print("File content size:", len(file_content))
 
     # Print the padded file content
     # print("Padded file content:", file_content_padded)
@@ -59,15 +60,18 @@ def send_file_to_server(sock, file_path, aes_key):
 
     # Create the header
     file_name = os.path.basename(file_path)
+    encrypted_size = len(encrypted_content)
+    print("Encrypted size:", encrypted_size)
     message_code = 1028  # Assuming 1026 is the code for "file sending"
-    header = struct.pack("<16s2sH4s", b'\0' * 16, version, message_code, str(len(encrypted_content)).encode())
-
+    header = struct.pack("<16s2sH4s", b'\0' * 16, version, message_code, struct.pack("<I", encrypted_size))
+    print("Packed size:", struct.pack("<I", encrypted_size))
 
 
     # Send the header and encrypted content
     try:
         try:
-            print(header)
+            # print(header)
+
             sock.sendall(header)
 
         except socket.error:

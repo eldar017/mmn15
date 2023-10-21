@@ -102,7 +102,11 @@ def handle_client_returning_login(conn, cursor, client_name):
 def handle_file_reception_request(conn, cursor, client_id, encrypted_file_size):
     # Assuming the size of file name is 255
     encrypted_file_content = conn.recv(encrypted_file_size)
-
+    HEADER_SIZE = 24  # 16 + 2 + 2 + 4
+    header_data = conn.recv(HEADER_SIZE)
+    _, _, _, encrypted_size_data = struct.unpack("<16s2sH4s", header_data)
+    encrypted_file_size = struct.unpack("<I", encrypted_size_data)[0]
+    print(f"encrypted file size: {encrypted_file_size}")
     # For now, I'll just save the encrypted content to a file.
     # Ideally, you'd decrypt the file here and perform other necessary actions.
     print("handle_file_reception_request")
@@ -110,18 +114,19 @@ def handle_file_reception_request(conn, cursor, client_id, encrypted_file_size):
     bytes_received = 0
     with open(f'received_file.enc', 'wb') as file:
         while bytes_received < encrypted_file_size:
-            print(f"Receiving chunk {bytes_received}...")
-            chunk = conn.recv(min(encrypted_file_size - bytes_received, 4096))
+            to_receive = min(encrypted_file_size - bytes_received, 4096)
+            chunk = conn.recv(to_receive)
             if not chunk:
-                # Handle error - client disconnected or other issue
+                print("Client disconnected or an error occurred.")
                 break
-            print(f"Received {len(chunk)} bytes.")
             file.write(chunk)
             bytes_received += len(chunk)
             print(f"Total received: {bytes_received} bytes.")
             if bytes_received == encrypted_file_size:
                 print("File received successfully!")
 
+    return encrypted_file_size
+    return encrypted_file_size
     print("File received successfully!")
     # Inform the client that the file was received.
     # Replace with the appropriate response code.
@@ -285,6 +290,7 @@ def server_loop(port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('0.0.0.0', port))
     s.listen(5)
+    s.settimeout(10)
 
     with sqlite3.connect('../db.defensive') as db_conn:
         cursor = db_conn.cursor()
@@ -294,6 +300,7 @@ def server_loop(port):
 
             try:
                 with conn:
+                    conn.settimeout(10)
                     while True:  # Add an inner loop to handle multiple requests from the same client
                     # Decode the incoming message according to the protocol
                     #     time.sleep(2)
@@ -324,7 +331,9 @@ def server_loop(port):
                             # File sending request
                         elif code == 1028:  # This is the code for file sending
                             print("1028")
-                            encrypted_file_size = struct.unpack("<I", conn.recv(4))[0]
+                            received_data = conn.recv(4)
+                            print("Received data for size:", received_data)
+                            encrypted_file_size = struct.unpack("<I", received_data)[0]
                             handle_file_reception_request(conn, cursor, client_id, encrypted_file_size)
                             db_conn.commit()
 
