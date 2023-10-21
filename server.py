@@ -1,6 +1,7 @@
 import socket
 import sqlite3
 import struct
+import time
 import uuid
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES, PKCS1_OAEP
@@ -98,6 +99,35 @@ def handle_client_returning_login(conn, cursor, client_name):
         conn.sendall(struct.pack("<H", 2106))
 
 
+def handle_file_reception_request(conn, cursor, client_id, encrypted_file_size):
+    # Assuming the size of file name is 255
+    encrypted_file_content = conn.recv(encrypted_file_size)
+
+    # For now, I'll just save the encrypted content to a file.
+    # Ideally, you'd decrypt the file here and perform other necessary actions.
+    print("handle_file_reception_request")
+    print(f"encrypted file size :{encrypted_file_size}")
+    bytes_received = 0
+    with open(f'received_file.enc', 'wb') as file:
+        while bytes_received < encrypted_file_size:
+            print(f"Receiving chunk {bytes_received}...")
+            chunk = conn.recv(min(encrypted_file_size - bytes_received, 4096))
+            if not chunk:
+                # Handle error - client disconnected or other issue
+                break
+            print(f"Received {len(chunk)} bytes.")
+            file.write(chunk)
+            bytes_received += len(chunk)
+            print(f"Total received: {bytes_received} bytes.")
+            if bytes_received == encrypted_file_size:
+                print("File received successfully!")
+
+    print("File received successfully!")
+    # Inform the client that the file was received.
+    # Replace with the appropriate response code.
+    conn.sendall(struct.pack("<H", 2103))
+
+
 def handle_public_key_request(conn, cursor, client_name, public_key):
     # Update the client's public key in the database
     cursor.execute('''
@@ -139,7 +169,7 @@ def handle_registration_request(conn, cursor, client_name):
     print("Sending response to client...")
     conn.sendall(struct.pack("<H16s", 2100, client_id))
     print("Response sent!")
-    print_client_records()
+    # print_client_records()
 
 
 
@@ -174,6 +204,7 @@ def handle_send_public_key_request(conn, cursor, client_name, public_key):
 
 
 def handle_send_file_request(conn, cursor, client_id, file_size, file_name, encrypted_content):
+    print("handle_send_file_request")
     cursor.execute('SELECT AESKey FROM clients WHERE ID=?', (client_id,))
     aes_key_entry = cursor.fetchone()
 
@@ -190,6 +221,7 @@ def handle_send_file_request(conn, cursor, client_id, file_size, file_name, encr
 
     # Save the file locally
     local_file_path = f'files/{file_name}'
+    print(f"the path of the file is: {local_file_path}")
     with open(local_file_path, 'wb') as f:
         f.write(file_content)
 
@@ -249,40 +281,62 @@ def handle_invalid_crc_resend_request(conn, cursor, client_id, file_name):
     print("handle_invalid_crc_resend_request  ")
     pass  # Placeholder
 
-
 def server_loop(port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('0.0.0.0', port))
     s.listen(5)
 
-    while True:  # Add an infinite loop to keep the server running
-        conn, addr = s.accept()
-        try:
-            with conn:
-                # Decode the incoming message according to the protocol
-                try:
-                    header, version, code, payload_size = struct.unpack("<16s2sH4s", conn.recv(24))
-                    client_id = header
-                except Exception as e:
-                    print(f"Failed to unpack the received data due to: {e}")
-                    return
+    with sqlite3.connect('../db.defensive') as db_conn:
+        cursor = db_conn.cursor()
 
-                if code == 1025:
-                    # Registration request
-                    client_name = conn.recv(255).decode().rstrip('\0')
+        while True:  # Add an infinite loop to keep the server running
+            conn, addr = s.accept()
 
-                    with sqlite3.connect('../db.defensive') as db_conn:
-                        cursor = db_conn.cursor()
-                        handle_registration_request(conn, cursor, client_name)
-                        db_conn.commit()
-
-        except Exception as e:
-            print(f"Error while handling client  {addr}: {e}")
             try:
-                conn.sendall(struct.pack("<H", 2107))
-            except:
-                pass  # ignore if we can't send the error
-            conn.close()
+                with conn:
+                    while True:  # Add an inner loop to handle multiple requests from the same client
+                    # Decode the incoming message according to the protocol
+                    #     time.sleep(2)
+                        try:
+                            print(f"New connection from {addr}")
+                            data = conn.recv(24)
+                            if len(data) != 24:
+                                print("Received unexpected number of bytes from client.")
+                                continue
+
+                            header, version, code, payload_size = struct.unpack("<16s2sH4s", data)
+                            print(code)
+                            client_id = header
+                        except Exception as e:
+                            print(f"Failed to unpack the received data due to: {e}")
+                            return
+
+                        print(f"the code is:{code}")
+
+                        if code == 1025:
+                            # Registration request
+                            client_name = conn.recv(255).decode().rstrip('\0')
+                            handle_registration_request(conn, cursor, client_name)
+                            db_conn.commit()
+
+                        elif code == 1026:
+                            print("1026")
+                            # File sending request
+                        elif code == 1028:  # This is the code for file sending
+                            print("1028")
+                            encrypted_file_size = struct.unpack("<I", conn.recv(4))[0]
+                            handle_file_reception_request(conn, cursor, client_id, encrypted_file_size)
+                            db_conn.commit()
+
+            except Exception as e:
+                print(f"Error while handling client {addr}: {e}")
+                try:
+                    conn.sendall(struct.pack("<H", 2107))
+                except:
+                    pass  # ignore if we can't send the error
+                print("Closing connection...")
+                conn.close()
+                print("Connection closed.")
 
 def print_client_records():
     with sqlite3.connect('../db.defensive') as db_conn:
